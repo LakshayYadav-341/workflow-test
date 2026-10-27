@@ -1,3 +1,4 @@
 # Non-sensitive config for chat — prod environment.
 # Flat KEY: "value" pairs → ConfigMap chat-k8s-configmap (namespace: default).
 # Comment-only = placeholder; deploy-config.yml skips it.
+LOG_LEVEL: "info"
