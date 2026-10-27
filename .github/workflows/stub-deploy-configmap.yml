@@ -1,0 +1,33 @@
+name: stub-deploy-configmap
+# Stand-in for Arthvit/gs-deployment-workflows deploy-configmap.yml. Prints only, deploys nothing.
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      service_name:
+        required: true
+        type: string
+      configmap_name:
+        required: true
+        type: string
+      namespace:
+        required: false
+        default: default
+        type: string
+
+jobs:
+  deploy-configmap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Would apply ConfigMap
+        env:
+          FILE: deploy/${{ inputs.service_name }}/${{ inputs.environment }}/configmap.yaml
+        run: |
+          echo "STUB deploy-configmap"
+          echo "environment : ${{ inputs.environment }}"
+          echo "configmap   : ${{ inputs.configmap_name }} (ns ${{ inputs.namespace }})"
+          echo "file hash   : $(sha256sum "$FILE" | cut -c1-16)"

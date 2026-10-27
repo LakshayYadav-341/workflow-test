@@ -1,0 +1,19 @@
+name: stub-build-and-attach
+# Stand-in for Arthvit/gs-deployment-workflows build-and-attach.yml. Prints only, deploys nothing.
+
+on:
+  workflow_call:
+
+jobs:
+  build-and-attach:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Would build, push and release to staging
+        run: |
+          echo "STUB build-and-attach"
+          echo "image tag : ${GITHUB_SHA::10}"
+          echo "services  : $(ls -d deploy/*/ | xargs -n1 basename | paste -sd, -)"
+          echo "changed in this push:"
+          git fetch --depth=2 origin "$GITHUB_SHA" >/dev/null 2>&1 || true
+          git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "(first commit)"

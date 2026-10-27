@@ -1,0 +1,15 @@
+name: stub-promote-to-prod
+# Stand-in for Arthvit/gs-deployment-workflows promote-to-prod.yml. Prints only, deploys nothing.
+
+on:
+  workflow_call:
+    inputs:
+      source_tag:
+        required: true
+        type: string
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "STUB promote-to-prod source_tag=${{ inputs.source_tag }}"

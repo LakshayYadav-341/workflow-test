@@ -1,0 +1,132 @@
+name: deploy-config
+# Deploys ConfigMaps and ExternalSecrets automatically on every merge to main.
+#
+# Folder structure drives everything — no edits needed when adding a new service:
+#   deploy/<facets-service-name>/<env>/configmap.yaml  → Flow 1: K8s ConfigMap
+#   deploy/<facets-service-name>/<env>/secrets.yaml    → Flow 2: ExternalSecret → ESO → K8s Secret
+#
+# Naming convention (derived automatically from folder name):
+#   ConfigMap : <service-name>-k8s-configmap
+#   K8s Secret: <service-name>-k8s-secret
+#   GCP SM    : <service-name>-secrets
+
+on:
+  push:
+    branches: [main]
+    # No paths filter — runs on every merge to main.
+    # ConfigMaps: all services scanned; deploy-configmap.yml skips if hash unchanged (drift detection).
+    # Secrets:    only deploy when secrets.yaml explicitly changes (ESO handles periodic refresh).
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  # Builds two JSON matrices:
+  #   configmap_matrix → ALL deploy/*/env/configmap.yaml files (hash check skips unchanged ones)
+  #   secrets_matrix   → only secrets.yaml files changed in this push
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      configmap_matrix: ${{ steps.matrix.outputs.configmap }}
+      secrets_matrix: ${{ steps.matrix.outputs.secrets }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Build deployment matrix
+        id: matrix
+        shell: bash
+        env:
+          GIT_BEFORE: ${{ github.event.before }}
+          GIT_AFTER: ${{ github.sha }}
+          # Note: GIT_BEFORE/GIT_AFTER retained for potential future use; not currently used.
+        run: |
+          set -euo pipefail
+
+          cm_entries=()
+          sec_entries=()
+
+          add_entry() {
+            local type=$1 svc=$2 env=$3
+            if [[ "$type" == "configmap" ]]; then
+              cm_entries+=("{\"service_name\":\"$svc\",\"environment\":\"$env\",\"configmap_name\":\"${svc}-k8s-configmap\"}")
+            else
+              sec_entries+=("{\"service_name\":\"$svc\",\"environment\":\"$env\",\"secret_name\":\"${svc}-k8s-secret\"}")
+            fi
+          }
+
+          # ConfigMaps: scan ALL deploy/*/env/configmap.yaml files.
+          # deploy-configmap.yml compares file hash vs. the annotation stored in K8s
+          # and skips apply if already up to date — self-heals any previously failed deploy.
+          # Skip placeholder files that have no actual key-value pairs (comments only).
+          while IFS= read -r file; do
+            if [[ "$file" =~ ^deploy/([^/]+)/(staging|prod)/configmap\.yaml$ ]]; then
+              if ! grep -qE '^[^#[:space:]]' "$file" 2>/dev/null; then
+                echo "Skipping $file — placeholder only (no key-value pairs)"
+                continue
+              fi
+              add_entry "configmap" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+            fi
+          done < <(find deploy -name "configmap.yaml" | sort)
+
+          # Secrets: scan ALL deploy/*/env/secrets.yaml files (same as ConfigMaps).
+          # deploy-secrets.yml compares file hash vs. the annotation stored in the ExternalSecret CR
+          # and skips apply if already up to date — self-heals any previously failed deploy.
+          # Skip placeholder files (comments only). To activate ESO for a service, add 'enabled: true'.
+          while IFS= read -r file; do
+            if [[ "$file" =~ ^deploy/([^/]+)/(staging|prod)/secrets\.yaml$ ]]; then
+              if ! grep -qE '^[^#[:space:]]' "$file" 2>/dev/null; then
+                echo "Skipping $file — placeholder only (no 'enabled: true')"
+                continue
+              fi
+              add_entry "secrets" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+            fi
+          done < <(find deploy -name "secrets.yaml" | sort)
+
+          # Deduplicate and build JSON arrays
+          to_json() {
+            local -n arr=$1
+            if [[ ${#arr[@]} -eq 0 ]]; then echo "[]"; return; fi
+            printf '%s\n' "${arr[@]}" | sort -u | jq -sc '.'
+          }
+
+          cm_json=$(to_json cm_entries)
+          sec_json=$(to_json sec_entries)
+
+          echo "configmap=$cm_json" >> "$GITHUB_OUTPUT"
+          echo "secrets=$sec_json" >> "$GITHUB_OUTPUT"
+          echo "ConfigMap jobs : $cm_json"
+          echo "Secrets jobs   : $sec_json"
+
+  # Flow 1: apply ConfigMap for every entry in configmap_matrix
+  deploy-configmap:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.configmap_matrix != '[]' && needs.detect-changes.outputs.configmap_matrix != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.detect-changes.outputs.configmap_matrix) }}
+    uses: ./.github/workflows/stub-deploy-configmap.yml
+    with:
+      environment: ${{ matrix.environment }}
+      service_name: ${{ matrix.service_name }}
+      configmap_name: ${{ matrix.configmap_name }}
+      namespace: default
+    secrets: inherit
+
+  # Flow 2: apply ExternalSecret for every entry in secrets_matrix
+  deploy-secrets:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.secrets_matrix != '[]' && needs.detect-changes.outputs.secrets_matrix != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.detect-changes.outputs.secrets_matrix) }}
+    uses: ./.github/workflows/stub-deploy-secrets.yml
+    with:
+      environment: ${{ matrix.environment }}
+      service_name: ${{ matrix.service_name }}
+      namespace: default
+    secrets: inherit

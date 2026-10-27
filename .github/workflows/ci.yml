@@ -1,0 +1,17 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'deploy/**'   # deploy-config.yml handles deploy/ changes; no need to build image
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/stub-build-and-attach.yml
+    secrets: inherit

@@ -1,0 +1,22 @@
+name: promote-to-prod
+
+run-name: Promote ${{ inputs.source_tag }} to prod (started by ${{ github.triggering_actor }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: Stage image tag to promote (10-char SHA of a staged build)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  promote:
+    uses: ./.github/workflows/stub-promote-to-prod.yml
+    with:
+      source_tag: ${{ inputs.source_tag }}
+    secrets: inherit
